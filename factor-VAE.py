@@ -62,10 +62,41 @@ class Decoder(nn.Module):
         x = torch.sigmoid(self.deconv5(x))  # Sigmoid activation for the last layer if the output is normalized [0, 1]
         return x
 
-# Combine Encoder and Decoder into an Autoencoder
-class beta_VAE(nn.Module):
+# Discriminator
+
+class MLP_Discriminator(nn.Module):
+    def __init__(self, latent_dim=6):
+        super(MLP_Discriminator, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(latent_dim, 1024),
+            nn.ReLU(inplace=True),
+            nn.Linear(1024, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x):
+        x = x.view(x.size(0),-1)
+        x = self.layers(x)
+        return x
+    
+    def permute_dims(z):
+        B, d = z.shape
+        for j in range(d):
+            pi = np.random.permutation(B)
+            z[j] = z[j][pi]
+        return z
+    
+    def discrim_loss(self, discrim_probas, new_discrim_probas):
+        loss = 0.5*torch.mean(torch.log(discrim_probas)) - 0.5*torch.mean(torch.log(1-new_discrim_probas))
+        return loss
+
+
+# Combine Encoder, Decoder and Discriminator into Factor-VAE
+class Factor_VAE(nn.Module):
     def __init__(self, latent_size=6):
-        super(beta_VAE, self).__init__()
+        super(Factor_VAE, self).__init__()
         self.encoder = Encoder(latent_size=latent_size)
         self.decoder = Decoder(latent_size=latent_size)
     
@@ -78,43 +109,71 @@ class beta_VAE(nn.Module):
         mu, logvar = self.encoder(x)
         z = self.reparameterize(mu, logvar)
         reconstructed = self.decoder(z)
-        return reconstructed, mu, logvar
-    
-    def loss(self, x_recons, x, mu, logvar, beta):
+        return reconstructed, mu, logvar, z
+
+    def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_proba):
         reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
+        MLP_loss = torch.log(discriminator_proba/(1-discriminator_proba))
 
-        return reproduction_loss + beta*KLD
+        return reproduction_loss + KLD - gamma * MLP_loss
 
-def train(model, optimizer, epochs, device="cpu", beta=4):
+
+def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cpu", gamma=4):
     model.train()
+    discrim.train()
     for epoch in range(epochs):
         t= time.time()
-        overall_loss = 0
+        overall_vae_loss = 0
+        overall_discrim_loss = 0
         for x in train_loader:
             x = x.to(device)
 
-            optimizer.zero_grad()
+            model_optimizer.zero_grad()
+            discrim_optimizer.zero_grad()
 
-            x_recons, mean, logvar = model(x)
-            loss = model.loss(x_recons, x, mean, logvar, beta)
-            
-            overall_loss += loss.item()
-            
-            loss.backward()
-            optimizer.step()
+            # Update of the VAE parameters
 
-        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(train_loader.dataset), "\tDuration: ", time.time()-t)
-    return overall_loss
+            x_recons, mean, logvar, z = model(x) # Used for the FVAE update
+
+            discrim_probas = discrim(z)
+
+            fvae_loss = model.fvae_loss(x_recons, x, mean, logvar, gamma, discrim_probas)
+            
+            overall_vae_loss += fvae_loss.item()
+            
+            fvae_loss.backward()
+
+            model_optimizer.step()
+
+            # Update of the discriminator parameters
+
+            _, mean, logvar, z = model(x) # Used for the MLP update
+
+            z = discrim.permute_dims(z)
+
+            new_discrim_probas = discrim(z)
+
+            discrim_loss = discrim.discrim_loss(discrim_probas, new_discrim_probas)
+
+            overall_discrim_loss += discrim_loss.item()
+
+            discrim_optimizer.step()
+
+        print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_loader.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_loader.dataset), "\tDuration: ", time.time()-t)
+    return overall_vae_loss, overall_discrim_loss
 
 device = "cuda"
 
-model = beta_VAE().to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+model = Factor_VAE().to(device)
+model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+discrim = MLP_Discriminator().to(device)
+discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-3)
 
 # Training
-beta = 4
+gamma = 40
 
-train(model, optimizer, 10, device=device, beta = beta)
+train(model, discrim, model_optimizer, discrim_optimizer, 20, device=device, gamma=gamma)
 
-torch.save(model.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/beta4_vae.pt")
+torch.save(model.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/factor_vae_model.pt")
+torch.save(discrim.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/factor_vae_discrim.pt")
