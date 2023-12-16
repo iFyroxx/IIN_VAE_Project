@@ -27,8 +27,7 @@ class Encoder(nn.Module):
         self.conv3 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
         self.conv4 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
         self.conv5 = nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)
-        self.fc_mu = nn.Linear(512 * 2 * 2, latent_size)
-        self.fc_logvar = nn.Linear(512 * 2 * 2, latent_size)
+        self.conv6 = nn.Conv2d(512, 2*latent_size, 1)
 
     def forward(self, x):
         x = torch.relu(self.conv1(x))
@@ -36,10 +35,8 @@ class Encoder(nn.Module):
         x = torch.relu(self.conv3(x))
         x = torch.relu(self.conv4(x))
         x = torch.relu(self.conv5(x))
-        x = x.view(-1,512*2*2)
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
-        return mu, logvar
+        x = self.conv6(x)
+        return x
 
 # Decoder
 class Decoder(nn.Module):
@@ -66,6 +63,7 @@ class Decoder(nn.Module):
 class beta_VAE(nn.Module):
     def __init__(self, latent_size=6):
         super(beta_VAE, self).__init__()
+        self.latent_size = latent_size
         self.encoder = Encoder(latent_size=latent_size)
         self.decoder = Decoder(latent_size=latent_size)
     
@@ -75,7 +73,9 @@ class beta_VAE(nn.Module):
         return mu + eps * std
 
     def forward(self, x):
-        mu, logvar = self.encoder(x)
+        latent = self.encoder(x)
+        mu = latent[:, :self.latent_size]
+        logvar = latent[:, self.latent_size:]
         z = self.reparameterize(mu, logvar)
         reconstructed = self.decoder(z)
         return reconstructed, mu, logvar

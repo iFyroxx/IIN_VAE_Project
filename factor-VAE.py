@@ -1,3 +1,6 @@
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 from torch import nn
 import torch
 from torchvision import transforms
@@ -27,76 +30,99 @@ class Encoder(nn.Module):
         self.conv3 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
         self.conv4 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
         self.conv5 = nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)
-        self.fc_mu = nn.Linear(512 * 2 * 2, latent_size)
-        self.fc_logvar = nn.Linear(512 * 2 * 2, latent_size)
+        self.fc = nn.Linear(512*2*2, 2*latent_size)
+        self.layers = nn.Sequential(
+            self.conv1,
+            nn.ReLU(True),
+            self.conv2,
+            nn.ReLU(True),
+            self.conv3,
+            nn.ReLU(True),
+            self.conv4,
+            nn.ReLU(True),
+            self.conv5,
+            nn.ReLU(True),
+            nn.Flatten(),
+            self.fc,
+        )
 
     def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = torch.relu(self.conv3(x))
-        x = torch.relu(self.conv4(x))
-        x = torch.relu(self.conv5(x))
-        x = x.view(-1,512*2*2)
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
-        return mu, logvar
+        z = self.layers(x)
+        return z
 
 # Decoder
 class Decoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Decoder, self).__init__()
-        self.fc = nn.Linear(latent_size, 512 * 2 * 2)
+        self.fc = nn.Linear(latent_size, 512*2*2)
         self.deconv1 = nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1)
         self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
         self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
         self.deconv4 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
         self.deconv5 = nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1)
+        self.layers = nn.Sequential(
+            self.fc,
+            nn.ReLU(True),
+            nn.Unflatten(1,(512,2,2)),
+            self.deconv1,
+            nn.ReLU(True),
+            self.deconv2,
+            nn.ReLU(True),
+            self.deconv3,
+            nn.ReLU(True),
+            self.deconv4,
+            nn.ReLU(True),
+            self.deconv5,
+        )
 
-    def forward(self, x):
-        x = self.fc(x)
-        x = x.view(x.size(0), 512, 2, 2)
-        x = torch.relu(self.deconv1(x))
-        x = torch.relu(self.deconv2(x))
-        x = torch.relu(self.deconv3(x))
-        x = torch.relu(self.deconv4(x))
-        x = torch.sigmoid(self.deconv5(x))  # Sigmoid activation for the last layer if the output is normalized [0, 1]
-        return x
-
+    def forward(self, z):
+        x_recons = self.layers(z)
+        return x_recons
 # Discriminator
 
 class MLP_Discriminator(nn.Module):
     def __init__(self, latent_dim=6):
         super(MLP_Discriminator, self).__init__()
+        self.latent_size = latent_dim
         self.layers = nn.Sequential(
             nn.Linear(latent_dim, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, 1),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(1024,1024),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(1024,1024),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(1024,1024),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(1024, 1),
             nn.Sigmoid()
         )
     
     def forward(self, x):
-        x = x.view(x.size(0),-1)
+        x = x.view(-1,6)
         x = self.layers(x)
         return x
     
-    def permute_dims(z):
-        B, d = z.shape
-        for j in range(d):
-            pi = np.random.permutation(B)
-            z[j] = z[j][pi]
-        return z
+    def permute_dims(self,z):
+        assert z.dim() == 2
+
+        B, _ = z.size()
+        perm_z = []
+        for z_j in z.split(1, 1):
+            perm = torch.randperm(B).to(z.device)
+            perm_z_j = z_j[perm]
+            perm_z.append(perm_z_j)
+
+        return torch.cat(perm_z, 1)
     
     def discrim_loss(self, discrim_probas, new_discrim_probas):
-        loss = 0.5*torch.mean(torch.log(discrim_probas)) - 0.5*torch.mean(torch.log(1-new_discrim_probas))
+        loss = 0.5*(torch.nn.functional.binary_cross_entropy(discrim_probas, torch.zeros((batch_size,1), dtype=torch.float, device=device)) + torch.nn.functional.binary_cross_entropy(new_discrim_probas, torch.ones((batch_size,1), dtype=torch.float, device=device)))
         return loss
-
 
 # Combine Encoder, Decoder and Discriminator into Factor-VAE
 class Factor_VAE(nn.Module):
     def __init__(self, latent_size=6):
         super(Factor_VAE, self).__init__()
+        self.latent_size = latent_size
         self.encoder = Encoder(latent_size=latent_size)
         self.decoder = Decoder(latent_size=latent_size)
     
@@ -105,65 +131,72 @@ class Factor_VAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, x):
-        mu, logvar = self.encoder(x)
+    def forward(self, x, no_dec = False):
+        latent = self.encoder(x)
+        mu = latent[:, :self.latent_size]
+        logvar = latent[:, self.latent_size:]
         z = self.reparameterize(mu, logvar)
-        reconstructed = self.decoder(z)
-        return reconstructed, mu, logvar, z
-
-    def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_proba):
-        reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
+        if no_dec:
+            return z.detach()
+        else:
+            reconstructed = self.decoder(z)
+            return reconstructed, mu, logvar, z
+    
+    def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_probas):
+        reproduction_loss = nn.functional.binary_cross_entropy_with_logits(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
-        MLP_loss = torch.log(discriminator_proba/(1-discriminator_proba))
+        MLP_loss = torch.mean(torch.log(discriminator_probas/(1-discriminator_probas)))
 
         return reproduction_loss + KLD - gamma * MLP_loss
 
+from tqdm import tqdm
 
 def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cpu", gamma=4):
     model.train()
     discrim.train()
+
     for epoch in range(epochs):
-        t= time.time()
+        t = time.time()
         overall_vae_loss = 0
         overall_discrim_loss = 0
-        for x in train_loader:
-            x = x.to(device)
-
-            model_optimizer.zero_grad()
-            discrim_optimizer.zero_grad()
+        for i in tqdm(range(0, len(train_loader), 2)):
+            x1 = next(iter(train_loader))
+            x2 = next(iter(train_loader))
+            x1 = x1.to(device)
+            x2 = x2.to(device)
 
             # Update of the VAE parameters
+            x_recons, mean, logvar, z = model(x1)  # Used for both the FVAE update and MLP update
 
-            x_recons, mean, logvar, z = model(x) # Used for the FVAE update
+            discrim_probas = discrim(z).detach()
 
-            discrim_probas = discrim(z)
-
-            fvae_loss = model.fvae_loss(x_recons, x, mean, logvar, gamma, discrim_probas)
+            fvae_loss = model.fvae_loss(x_recons, x1, mean, logvar, gamma, discrim_probas)
             
-            overall_vae_loss += fvae_loss.item()
-            
-            fvae_loss.backward()
+            overall_vae_loss = overall_vae_loss + fvae_loss
 
+            model_optimizer.zero_grad()
+            fvae_loss.backward(retain_graph=True)
             model_optimizer.step()
 
             # Update of the discriminator parameters
+            z2 = model(x2, no_dec= True)  # Used for the MLP update
 
-            _, mean, logvar, z = model(x) # Used for the MLP update
+            z2 = discrim.permute_dims(z2)
 
-            z = discrim.permute_dims(z)
-
-            new_discrim_probas = discrim(z)
+            new_discrim_probas = discrim(z2)
 
             discrim_loss = discrim.discrim_loss(discrim_probas, new_discrim_probas)
 
-            overall_discrim_loss += discrim_loss.item()
+            overall_discrim_loss = overall_discrim_loss + discrim_loss.item()
 
+            discrim_optimizer.zero_grad()
+            discrim_loss.backward()
             discrim_optimizer.step()
 
-        print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_loader.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_loader.dataset), "\tDuration: ", time.time()-t)
+        print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_loader.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_loader.dataset), "\tDuration: ", time.time() - t)
     return overall_vae_loss, overall_discrim_loss
 
-device = "cuda"
+device = "cpu"
 
 model = Factor_VAE().to(device)
 model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -172,6 +205,8 @@ discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-3)
 
 # Training
 gamma = 40
+
+print("Training starting")
 
 train(model, discrim, model_optimizer, discrim_optimizer, 20, device=device, gamma=gamma)
 
