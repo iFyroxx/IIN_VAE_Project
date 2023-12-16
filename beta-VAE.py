@@ -6,36 +6,17 @@ from PIL import Image
 import numpy as np
 
 # Dataset initialization
+transform = transforms.ToTensor()
 
-class DSpritesDataset(Dataset):
-    def __init__(self, data_path, transform=None):
-        self.data = np.load(data_path, allow_pickle=True, encoding='bytes')["imgs"]
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        item = self.data[idx]
-        img = Image.fromarray(item[b'image'], mode='L')  # Convert to PIL Image
-
-        if self.transform:
-            img = self.transform(img)
-
-        return img
-    
-transform = transforms.Compose([
-    transforms.Resize((64, 64)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5,), (0.5,))
-])
-
-dataset = DSpritesDataset(data_path='C:/Users/Charles/Desktop/MVA/IIN/Projet/IIN_VAE_Projects/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', transform=transform)
+dataset = np.load('C:/Users/Charles/Desktop/MVA/IIN/Projet/IIN_VAE_Projects/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"]
+dataset=[transform(Image.fromarray(img,mode="L")) for img in dataset]
+train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
 
 from torch.utils.data import DataLoader
 
 batch_size = 64
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
 # Encoder
 class Encoder(nn.Module):
@@ -46,7 +27,8 @@ class Encoder(nn.Module):
         self.conv3 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
         self.conv4 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
         self.conv5 = nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)
-        self.fc = nn.Linear(512 * 4 * 4, latent_size)
+        self.fc_mu = nn.Linear(512 * 2 * 2, latent_size)
+        self.fc_logvar = nn.Linear(512 * 2 * 2, latent_size)
 
     def forward(self, x):
         x = torch.relu(self.conv1(x))
@@ -54,15 +36,16 @@ class Encoder(nn.Module):
         x = torch.relu(self.conv3(x))
         x = torch.relu(self.conv4(x))
         x = torch.relu(self.conv5(x))
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
-        return x
+        x = x.view(-1,512*2*2)
+        mu = self.fc_mu(x)
+        logvar = self.fc_logvar(x)
+        return mu, logvar
 
 # Decoder
 class Decoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Decoder, self).__init__()
-        self.fc = nn.Linear(latent_size, 512 * 4 * 4)
+        self.fc = nn.Linear(latent_size, 512 * 2 * 2)
         self.deconv1 = nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1)
         self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
         self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
@@ -71,7 +54,7 @@ class Decoder(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
-        x = x.view(x.size(0), 512, 4, 4)
+        x = x.view(x.size(0), 512, 2, 2)
         x = torch.relu(self.deconv1(x))
         x = torch.relu(self.deconv2(x))
         x = torch.relu(self.deconv3(x))
@@ -80,16 +63,55 @@ class Decoder(nn.Module):
         return x
 
 # Combine Encoder and Decoder into an Autoencoder
-class Autoencoder(nn.Module):
+class beta_VAE(nn.Module):
     def __init__(self, latent_size=6):
-        super(Autoencoder, self).__init__()
+        super(beta_VAE, self).__init__()
         self.encoder = Encoder(latent_size=latent_size)
         self.decoder = Decoder(latent_size=latent_size)
+    
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def forward(self, x):
-        latent = self.encoder(x)
-        reconstructed = self.decoder(latent)
-        return reconstructed, latent
+        mu, logvar = self.encoder(x)
+        z = self.reparameterize(mu, logvar)
+        reconstructed = self.decoder(z)
+        return reconstructed, mu, logvar
+    
+    def loss(self, x_recons, x, mu, logvar, beta):
+        reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
+        KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
 
+        return reproduction_loss + beta*KLD
 
-        
+def train(model, optimizer, epochs, device="cpu", beta=4):
+    model.train()
+    for epoch in range(epochs):
+        overall_loss = 0
+        for x in train_loader:
+            x = x.to(device)
+
+            optimizer.zero_grad()
+
+            x_recons, mean, logvar = model(x)
+            loss = model.loss(x_recons, x, mean, logvar, beta)
+            
+            overall_loss += loss.item()
+            
+            loss.backward()
+            optimizer.step()
+
+        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(train_loader.dataset))
+    return overall_loss
+
+device = "cpu"
+
+model = beta_VAE().to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+# Training
+beta = 4
+
+train(model, optimizer, 20, device=device, beta = beta)
