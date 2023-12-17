@@ -9,17 +9,15 @@ import numpy as np
 import time
 
 # Dataset initialization
-transform = transforms.ToTensor()
+dataset = torch.tensor(np.load('C:/Users/Charles/Desktop/MVA/IIN/Projet/IIN_VAE_Project/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"])
 
-dataset = np.load('C:/Users/Admin/Desktop/MVA/IIN/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"]
-dataset=[transform(Image.fromarray(img,mode="L")) for img in dataset]
 train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
 
 from torch.utils.data import DataLoader
 
 batch_size = 64
-train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+train_set = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+test_set = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
 # Encoder
 class Encoder(nn.Module):
@@ -159,9 +157,9 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
         t = time.time()
         overall_vae_loss = 0
         overall_discrim_loss = 0
-        for i in tqdm(range(0, len(train_loader), 2)):
-            x1 = next(iter(train_loader))
-            x2 = next(iter(train_loader))
+        for i in tqdm(range(0, len(train_set), 2)):
+            x1 = next(iter(train_set))
+            x2 = next(iter(train_set))
             x1 = x1.to(device)
             x2 = x2.to(device)
 
@@ -193,7 +191,7 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
             discrim_loss.backward()
             discrim_optimizer.step()
 
-        print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_loader.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_loader.dataset), "\tDuration: ", time.time() - t)
+        print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_set.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_set.dataset), "\tDuration: ", time.time() - t)
     return overall_vae_loss, overall_discrim_loss
 
 device = "cuda"

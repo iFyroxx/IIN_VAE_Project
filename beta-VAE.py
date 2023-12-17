@@ -1,22 +1,19 @@
 from torch import nn
 import torch
-from torchvision import transforms
-from PIL import Image
 import numpy as np
 import time
+from tqdm import tqdm
 
 # Dataset initialization
-transform = transforms.ToTensor()
+dataset = torch.tensor(np.load('C:/Users/Charles/Desktop/MVA/IIN/Projet/IIN_VAE_Project/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
 
-dataset = np.load('C:/Users/Admin/Desktop/MVA/IIN/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"]
-dataset=[transform(Image.fromarray(img,mode="L")) for img in dataset]
 train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
 
 from torch.utils.data import DataLoader
 
 batch_size = 64
-train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+train_set = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+test_set = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
 # Encoder
 class Encoder(nn.Module):
@@ -27,37 +24,55 @@ class Encoder(nn.Module):
         self.conv3 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
         self.conv4 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
         self.conv5 = nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)
-        self.conv6 = nn.Conv2d(512, 2*latent_size, 1)
+        self.fc = nn.Linear(512*2*2, 2*latent_size)
+        self.layers = nn.Sequential(
+            self.conv1,
+            nn.ReLU(True),
+            self.conv2,
+            nn.ReLU(True),
+            self.conv3,
+            nn.ReLU(True),
+            self.conv4,
+            nn.ReLU(True),
+            self.conv5,
+            nn.ReLU(True),
+            nn.Flatten(),
+            self.fc,
+        )
 
     def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = torch.relu(self.conv3(x))
-        x = torch.relu(self.conv4(x))
-        x = torch.relu(self.conv5(x))
-        x = self.conv6(x)
-        return x
+        z = self.layers(x)
+        return z
 
 # Decoder
 class Decoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Decoder, self).__init__()
-        self.fc = nn.Linear(latent_size, 512 * 2 * 2)
+        self.fc = nn.Linear(latent_size, 512*2*2)
         self.deconv1 = nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1)
         self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
         self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
         self.deconv4 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
         self.deconv5 = nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1)
+        self.layers = nn.Sequential(
+            self.fc,
+            nn.ReLU(True),
+            nn.Unflatten(1,(512,2,2)),
+            self.deconv1,
+            nn.ReLU(True),
+            self.deconv2,
+            nn.ReLU(True),
+            self.deconv3,
+            nn.ReLU(True),
+            self.deconv4,
+            nn.ReLU(True),
+            self.deconv5,
+            nn.Sigmoid()
+        )
 
-    def forward(self, x):
-        x = self.fc(x)
-        x = x.view(x.size(0), 512, 2, 2)
-        x = torch.relu(self.deconv1(x))
-        x = torch.relu(self.deconv2(x))
-        x = torch.relu(self.deconv3(x))
-        x = torch.relu(self.deconv4(x))
-        x = torch.sigmoid(self.deconv5(x))  # Sigmoid activation for the last layer if the output is normalized [0, 1]
-        return x
+    def forward(self, z):
+        x_recons = self.layers(z)
+        return x_recons
 
 # Combine Encoder and Decoder into an Autoencoder
 class beta_VAE(nn.Module):
@@ -91,7 +106,7 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
     for epoch in range(epochs):
         t= time.time()
         overall_loss = 0
-        for x in train_loader:
+        for x in tqdm(train_set):
             x = x.to(device)
 
             optimizer.zero_grad()
@@ -104,10 +119,10 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
             loss.backward()
             optimizer.step()
 
-        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(train_loader.dataset), "\tDuration: ", time.time()-t)
+        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(train_set.dataset), "\tDuration: ", time.time()-t)
     return overall_loss
 
-device = "cuda"
+device = "cpu"
 
 model = beta_VAE().to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -117,4 +132,4 @@ beta = 4
 
 train(model, optimizer, 10, device=device, beta = beta)
 
-torch.save(model.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/beta4_vae.pt")
+torch.save(model.state_dict(), "C:/Users/Charles/Desktop/MVA/IIN/Projet/IIN_VAE_Project/beta4_vae.pt")
