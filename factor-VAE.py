@@ -9,7 +9,7 @@ import numpy as np
 import time
 
 # Dataset initialization
-dataset = torch.tensor(np.load('C:/Users/Charles/Desktop/MVA/IIN/Projet/IIN_VAE_Project/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"])
+dataset = torch.tensor(np.load('C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
 
 train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
 
@@ -206,7 +206,7 @@ gamma = 40
 
 print("Training starting")
 
-train(model, discrim, model_optimizer, discrim_optimizer, 20, device=device, gamma=gamma)
+train(model, discrim, model_optimizer, discrim_optimizer, 30, device=device, gamma=gamma)
 
 torch.save(model.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/factor_vae_model.pt")
 torch.save(discrim.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/factor_vae_discrim.pt")

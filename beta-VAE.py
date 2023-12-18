@@ -2,10 +2,9 @@ from torch import nn
 import torch
 import numpy as np
 import time
-from tqdm import tqdm
 
 # Dataset initialization
-dataset = torch.tensor(np.load('./dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
+dataset = torch.tensor(np.load('./dsprites_ndarray_co1sh3sc6or40x32y32_64x64_modified.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
 
 torch.manual_seed(10)
 train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
@@ -107,7 +106,7 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
     for epoch in range(epochs):
         t= time.time()
         overall_loss = 0
-        for x in tqdm(train_set):
+        for x in train_set:
             x = x.to(device)
 
             optimizer.zero_grad()
@@ -132,6 +131,6 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 # Training
 beta = 4
 
-train(model, optimizer, 30, device=device, beta = beta)
+train(model, optimizer, 200, device=device, beta = beta)
 
 torch.save(model.state_dict(), "./beta4_vae.pt")
