@@ -76,6 +76,7 @@ class Decoder(nn.Module):
     def forward(self, z):
         x_recons = self.layers(z)
         return x_recons
+
 # Discriminator
 
 class MLP_Discriminator(nn.Module):
@@ -83,20 +84,20 @@ class MLP_Discriminator(nn.Module):
         super(MLP_Discriminator, self).__init__()
         self.latent_size = latent_dim
         self.layers = nn.Sequential(
-            nn.Linear(latent_dim, 1024),
+            nn.Linear(latent_dim, 64),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(1024,1024),
+            nn.Linear(64,128),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(1024,1024),
+            nn.Linear(128,128),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(1024,1024),
+            nn.Linear(128,64),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(1024, 2),
+            nn.Linear(64, 1),
             nn.Sigmoid()
         )
     
     def forward(self, x):
-        x = x.view(-1,6)
+        x = x.view(-1,self.latent_size)
         x = self.layers(x)
         return x
     
@@ -113,7 +114,7 @@ class MLP_Discriminator(nn.Module):
         return torch.cat(perm_z, 1)
     
     def discrim_loss(self, discrim_probas, new_discrim_probas):
-        loss = 0.5*(torch.nn.functional.cross_entropy(discrim_probas, torch.zeros((batch_size), dtype=torch.long, device=device)) + torch.nn.functional.cross_entropy(new_discrim_probas, torch.ones((batch_size), dtype=torch.long, device=device)))
+        loss = 0.5*(torch.nn.functional.binary_cross_entropy(discrim_probas, torch.zeros((batch_size,1), dtype=torch.float, device=device)) + torch.nn.functional.binary_cross_entropy(new_discrim_probas, torch.ones((batch_size,1), dtype=torch.float, device=device)))
         return loss
 
 # Combine Encoder, Decoder and Discriminator into Factor-VAE
@@ -143,7 +144,7 @@ class Factor_VAE(nn.Module):
     def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_probas):
         reproduction_loss = nn.functional.binary_cross_entropy_with_logits(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
-        MLP_loss = torch.mean(discriminator_probas[:,:1]-discriminator_probas[:,1:])
+        MLP_loss = torch.mean(torch.log(discriminator_probas/(1-discriminator_probas)))
 
         return reproduction_loss + KLD - gamma * MLP_loss
 
@@ -196,7 +197,7 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
 
 device = "cuda"
 
-model = Factor_VAE().to(device)
+model = Factor_VAE(latent_size=5).to(device)
 model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 discrim = MLP_Discriminator().to(device)
 discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-3)

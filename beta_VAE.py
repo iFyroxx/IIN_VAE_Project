@@ -4,16 +4,18 @@ import numpy as np
 import time
 
 # Dataset initialization
-dataset = torch.tensor(np.load('./dsprites_ndarray_co1sh3sc6or40x32y32_64x64_modified.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
+dataset_imgs = torch.tensor(np.load('./dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
+dataset_labels = np.load('./dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["latents_values"]
 
 torch.manual_seed(10)
-train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
+imgs_train_set, imgs_test_set = torch.utils.data.random_split(dataset_imgs, [0.95,0.05])
+labels_train_set, labels_test_set = torch.utils.data.random_split(dataset_labels, [0.95,0.05])
 
 from torch.utils.data import DataLoader
 
 batch_size = 64
-train_set = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-test_set = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+imgs_train_set = DataLoader(imgs_train_set, batch_size=batch_size, shuffle=True)
+imgs_test_set = DataLoader(imgs_test_set, batch_size=batch_size, shuffle=False)
 
 # Encoder
 class Encoder(nn.Module):
@@ -35,13 +37,13 @@ class Encoder(nn.Module):
             self.conv4,
             nn.ReLU(True),
             self.conv5,
-            nn.ReLU(True),
-            nn.Flatten(),
-            self.fc,
+            nn.ReLU(True)
         )
 
     def forward(self, x):
         z = self.layers(x)
+        z = z.view(-1, 512*2*2)
+        z = self.fc(z)
         return z
 
 # Decoder
@@ -106,7 +108,7 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
     for epoch in range(epochs):
         t= time.time()
         overall_loss = 0
-        for x in train_set:
+        for x in imgs_train_set:
             x = x.to(device)
 
             optimizer.zero_grad()
@@ -119,18 +121,18 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
             loss.backward()
             optimizer.step()
 
-        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(train_set.dataset), "\tDuration: ", time.time()-t)
+        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(imgs_train_set.dataset), "\tDuration: ", time.time()-t)
     return overall_loss
 
 device = "cuda"
 
-model = beta_VAE().to(device)
+model = beta_VAE(latent_size=5).to(device)
 # model.load_state_dict(torch.load("./beta4_vae.pt"))
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 # Training
 beta = 4
 
-train(model, optimizer, 200, device=device, beta = beta)
+train(model, optimizer, 30, device=device, beta = beta)
 
-torch.save(model.state_dict(), "./beta4_vae.pt")
+torch.save(model.state_dict(), "./beta4-vae.pt")

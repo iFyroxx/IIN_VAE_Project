@@ -8,4 +8,4 @@ latent_values = dataset["latents_values"][indices]
 metadata = dataset["metadata"]
 latent_classes = dataset["latents_classes"][indices]
 
-np.savez("dsprites_no_scale.npz", metadata=metadata, imgs=images, latents_classes = latent_classes, latents_values=latent_values)
+np.savez_compressed("dsprites_no_scale.npz", metadata=metadata, imgs=images, latents_classes = latent_classes, latents_values=latent_values)
