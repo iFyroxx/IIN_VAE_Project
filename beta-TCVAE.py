@@ -96,11 +96,11 @@ class beta_VAE(nn.Module):
         reconstructed = self.decoder(z)
         return reconstructed, mu, logvar
     
-    def loss(self, x_recons, x, mu, logvar, beta):
+    def loss(self, x_recons, x, mu, logvar, alpha, beta, gamma):
         reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
-        KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
+        
 
-        return reproduction_loss + beta*KLD
+        return reproduction_loss
 
 def train(model, optimizer, epochs, device="cpu", beta=4):
     model.train()
