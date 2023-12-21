@@ -22,11 +22,11 @@ class Encoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Encoder, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
-        self.conv5 = nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)
-        self.fc = nn.Linear(512*2*2, 2*latent_size)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=4, stride=2, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=4, stride=2, padding=1)
+        self.conv5 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
+        self.fc = nn.Linear(128*2*2, 2*latent_size)
         self.layers = nn.Sequential(
             self.conv1,
             nn.ReLU(True),
@@ -42,7 +42,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         z = self.layers(x)
-        z = z.view(-1, 512*2*2)
+        z = z.view(-1, 128*2*2)
         z = self.fc(z)
         return z
 
@@ -50,16 +50,16 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Decoder, self).__init__()
-        self.fc = nn.Linear(latent_size, 512*2*2)
-        self.deconv1 = nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1)
-        self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
-        self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
-        self.deconv4 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
+        self.fc = nn.Linear(latent_size, 128*2*2)
+        self.deconv1 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
+        self.deconv2 = nn.ConvTranspose2d(64, 64, kernel_size=4, stride=2, padding=1)
+        self.deconv3 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
+        self.deconv4 = nn.ConvTranspose2d(32, 32, kernel_size=4, stride=2, padding=1)
         self.deconv5 = nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1)
         self.layers = nn.Sequential(
             self.fc,
             nn.ReLU(True),
-            nn.Unflatten(1,(512,2,2)),
+            nn.Unflatten(1,(128,2,2)),
             self.deconv1,
             nn.ReLU(True),
             self.deconv2,
@@ -68,8 +68,7 @@ class Decoder(nn.Module):
             nn.ReLU(True),
             self.deconv4,
             nn.ReLU(True),
-            self.deconv5,
-            nn.Sigmoid()
+            self.deconv5
         )
 
     def forward(self, z):
@@ -98,7 +97,7 @@ class beta_VAE(nn.Module):
         return reconstructed, mu, logvar
     
     def loss(self, x_recons, x, mu, logvar, beta):
-        reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
+        reproduction_loss = nn.functional.binary_cross_entropy_with_logits(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
 
         return reproduction_loss + beta*KLD
@@ -126,13 +125,14 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
 
 device = "cuda"
 
-model = beta_VAE(latent_size=5).to(device)
-# model.load_state_dict(torch.load("./beta4_vae.pt"))
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
 # Training
-beta = 4
+if __name__=="__main__":
+    for beta in [1,4,10]:
+        z = 9
+        model = beta_VAE(latent_size=z).to(device)
+        # model.load_state_dict(torch.load("./beta4_vae.pt"))
+        optimizer = torch.optim.Adagrad(model.parameters(), lr=1e-2)
+        epochs = 500
+        train(model, optimizer, epochs, device=device, beta = beta)
 
-train(model, optimizer, 30, device=device, beta = beta)
-
-torch.save(model.state_dict(), "./beta4-vae.pt")
+        torch.save(model.state_dict(), f"./beta{beta}_vae_{epochs}_z_{z}.pt")

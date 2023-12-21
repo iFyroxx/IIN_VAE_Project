@@ -60,17 +60,18 @@ class Decoder(nn.Module):
         self.deconv5 = nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1)
         self.layers = nn.Sequential(
             self.fc,
-            nn.ReLU(True),
+            nn.Tanh(),
             nn.Unflatten(1,(512,2,2)),
             self.deconv1,
-            nn.ReLU(True),
+            nn.Tanh(),
             self.deconv2,
-            nn.ReLU(True),
+            nn.Tanh(),
             self.deconv3,
-            nn.ReLU(True),
+            nn.Tanh(),
             self.deconv4,
-            nn.ReLU(True),
+            nn.Tanh(),
             self.deconv5,
+            nn.Sigmoid()
         )
 
     def forward(self, z):
@@ -142,7 +143,7 @@ class Factor_VAE(nn.Module):
             return reconstructed, mu, logvar, z
     
     def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_probas):
-        reproduction_loss = nn.functional.binary_cross_entropy_with_logits(x_recons, x, reduction='sum')
+        reproduction_loss = nn.functional.mse_loss(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
         MLP_loss = torch.mean(torch.log(discriminator_probas/(1-discriminator_probas)))
 
