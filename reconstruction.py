@@ -2,6 +2,7 @@ from classifier import LinearClassifier
 import torch
 import numpy as np
 from beta_VAE import beta_VAE
+from factor_VAE import Factor_VAE
 import matplotlib.pyplot as plt
 
 images = torch.tensor(np.load('./dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float)
@@ -9,11 +10,22 @@ labels = torch.tensor(np.load('./dsprites_no_scale.npz', allow_pickle=True, enco
 
 device = "cpu"
 
-beta=4
-model = beta_VAE(latent_size=4).to(device)
-model.load_state_dict(torch.load(f"./beta{beta}_vae_500.pt",map_location=torch.device("cpu")))
+model_type = "beta"
 
-x = images[30000].unsqueeze(0).to(device)
+if model_type=="beta":
+    # For beta-VAE
+    beta=1
+    z = 10
+    model = beta_VAE(latent_size=z).to(device)
+    model.load_state_dict(torch.load(f"./beta{beta}_vae_500_z_{z}.pt",map_location=torch.device("cpu")))
+
+elif model_type=="factor":
+    # For Factor-VAE
+    z = 10
+    model = Factor_VAE(latent_size=z).to(device)
+    model.load_state_dict(torch.load(f"./factor_vae_model_z_{z}.pt",map_location=torch.device("cpu")))
+
+x = images[40000].unsqueeze(0).to(device)
 model.eval()
 x_recons = model(x)[0].detach()
 

@@ -68,7 +68,8 @@ class Decoder(nn.Module):
             nn.ReLU(True),
             self.deconv4,
             nn.ReLU(True),
-            self.deconv5
+            self.deconv5,
+            nn.Sigmoid()
         )
 
     def forward(self, z):
@@ -97,7 +98,7 @@ class beta_VAE(nn.Module):
         return reconstructed, mu, logvar
     
     def loss(self, x_recons, x, mu, logvar, beta):
-        reproduction_loss = nn.functional.binary_cross_entropy_with_logits(x_recons, x, reduction='sum')
+        reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
 
         return reproduction_loss + beta*KLD
@@ -128,10 +129,10 @@ device = "cuda"
 # Training
 if __name__=="__main__":
     for beta in [1,4,10]:
-        z = 9
+        z = 10
         model = beta_VAE(latent_size=z).to(device)
         # model.load_state_dict(torch.load("./beta4_vae.pt"))
-        optimizer = torch.optim.Adagrad(model.parameters(), lr=1e-2)
+        optimizer = torch.optim.Adagrad(model.parameters(), lr=1e-3)
         epochs = 500
         train(model, optimizer, epochs, device=device, beta = beta)
 

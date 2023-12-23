@@ -17,24 +17,24 @@ class LinearClassifier(nn.Module):
         return nn.functional.softmax(self.linear(x),dim=1)
 
 B=512
-L=50
+L=100
 device = "cuda"
 torch.manual_seed(10)
 
 if __name__=="__main__":
-    z=4
+    z=10
     for beta in [1,4,10]:
         classifier = LinearClassifier(in_features=z).to(device)
 
         # Define a loss function and optimizer
-        optimizer = torch.optim.Adam(classifier.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(classifier.parameters(), lr=1e-5)
         loss_fn = nn.CrossEntropyLoss()
         model = beta_VAE(latent_size=z).to(device)
-        model.load_state_dict(torch.load(f"./beta{beta}_vae_500.pt"))
+        model.load_state_dict(torch.load(f"./beta{beta}_vae_500_z_{z}.pt"))
         # Train the classifier on the training data
         classifier.train()
         model.eval()
-        for epoch in range(10):
+        for epoch in range(5):
             z_diff = torch.zeros((B, z)).to(device)
             possible_factors = torch.tensor([1,3,4,5])
             y_true_idx = torch.ones(4).multinomial(B,replacement=True)
@@ -70,7 +70,10 @@ if __name__=="__main__":
             loss.backward()
             optimizer.step()
 
-            print("Epoch :", epoch, "\tLoss :", loss.item(), "\tAccuracy :", acc)
+            if epoch%1==0:
+
+                print("Epoch :", epoch, "\tLoss :", loss.item(), "\tAccuracy :", acc)
 
 
-        torch.save(classifier.state_dict(), f"./classifier_{beta}.pt")
+        torch.save(classifier.state_dict(), f"./classifier_{beta}_z_{z}.pt")
+

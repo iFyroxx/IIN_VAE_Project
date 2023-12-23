@@ -9,7 +9,7 @@ import numpy as np
 import time
 
 # Dataset initialization
-dataset = torch.tensor(np.load('C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
+dataset = torch.tensor(np.load('C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
 
 train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
 
@@ -24,11 +24,11 @@ class Encoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Encoder, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)
-        self.conv5 = nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)
-        self.fc = nn.Linear(512*2*2, 2*latent_size)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=4, stride=2, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=4, stride=2, padding=1)
+        self.conv5 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)
+        self.fc = nn.Linear(128*2*2, 2*latent_size)
         self.layers = nn.Sequential(
             self.conv1,
             nn.ReLU(True),
@@ -39,37 +39,37 @@ class Encoder(nn.Module):
             self.conv4,
             nn.ReLU(True),
             self.conv5,
-            nn.ReLU(True),
-            nn.Flatten(),
-            self.fc,
+            nn.ReLU(True)
         )
 
     def forward(self, x):
         z = self.layers(x)
+        z = z.view(-1, 128*2*2)
+        z = self.fc(z)
         return z
 
 # Decoder
 class Decoder(nn.Module):
     def __init__(self, latent_size=6):
         super(Decoder, self).__init__()
-        self.fc = nn.Linear(latent_size, 512*2*2)
-        self.deconv1 = nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1)
-        self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
-        self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
-        self.deconv4 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
+        self.fc = nn.Linear(latent_size, 128*2*2)
+        self.deconv1 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
+        self.deconv2 = nn.ConvTranspose2d(64, 64, kernel_size=4, stride=2, padding=1)
+        self.deconv3 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
+        self.deconv4 = nn.ConvTranspose2d(32, 32, kernel_size=4, stride=2, padding=1)
         self.deconv5 = nn.ConvTranspose2d(32, 1, kernel_size=4, stride=2, padding=1)
         self.layers = nn.Sequential(
             self.fc,
-            nn.Tanh(),
-            nn.Unflatten(1,(512,2,2)),
+            nn.ReLU(True),
+            nn.Unflatten(1,(128,2,2)),
             self.deconv1,
-            nn.Tanh(),
+            nn.ReLU(True),
             self.deconv2,
-            nn.Tanh(),
+            nn.ReLU(True),
             self.deconv3,
-            nn.Tanh(),
+            nn.ReLU(True),
             self.deconv4,
-            nn.Tanh(),
+            nn.ReLU(True),
             self.deconv5,
             nn.Sigmoid()
         )
@@ -105,17 +105,17 @@ class MLP_Discriminator(nn.Module):
     def permute_dims(self,z):
         assert z.dim() == 2
 
-        B, _ = z.size()
-        perm_z = []
-        for z_j in z.split(1, 1):
-            perm = torch.randperm(B).to(z.device)
-            perm_z_j = z_j[perm]
-            perm_z.append(perm_z_j)
+        B, d = z.size()
+        perm_z = torch.zeros_like(z)
+        for j in range(d):
+            perm = torch.randperm(B)
+            perm_z[:,j] = z[perm,j]
 
-        return torch.cat(perm_z, 1)
+        return perm_z
     
     def discrim_loss(self, discrim_probas, new_discrim_probas):
-        loss = 0.5*(torch.nn.functional.binary_cross_entropy(discrim_probas, torch.zeros((batch_size,1), dtype=torch.float, device=device)) + torch.nn.functional.binary_cross_entropy(new_discrim_probas, torch.ones((batch_size,1), dtype=torch.float, device=device)))
+        zeros = torch.zeros((batch_size,1), dtype=torch.float, device=device)
+        loss = -0.5*torch.mean(torch.log(discrim_probas) + torch.log(1-new_discrim_probas))
         return loss
 
 # Combine Encoder, Decoder and Discriminator into Factor-VAE
@@ -143,9 +143,9 @@ class Factor_VAE(nn.Module):
             return reconstructed, mu, logvar, z
     
     def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_probas):
-        reproduction_loss = nn.functional.mse_loss(x_recons, x, reduction='sum')
+        reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
-        MLP_loss = torch.mean(torch.log(discriminator_probas/(1-discriminator_probas)))
+        MLP_loss = torch.mean(torch.log(discriminator_probas) - torch.log(1-discriminator_probas))
 
         return reproduction_loss + KLD - gamma * MLP_loss
 
@@ -159,13 +159,12 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
         t = time.time()
         overall_vae_loss = 0
         overall_discrim_loss = 0
-        for i in tqdm(range(0, len(train_set), 2)):
+        for i in range(0, len(train_set), 2):
             x1 = next(iter(train_set))
             x2 = next(iter(train_set))
             x1 = x1.to(device)
             x2 = x2.to(device)
 
-            model_optimizer.zero_grad()
             # Update of the VAE parameters
             x_recons, mean, logvar, z = model(x1)  # Used for both the FVAE update and MLP update
 
@@ -175,14 +174,14 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
             
             overall_vae_loss = overall_vae_loss + fvae_loss.item()
 
+            model_optimizer.zero_grad()
             fvae_loss.backward(retain_graph=True)
             model_optimizer.step()
 
-            discrim_optimizer.zero_grad()
             # Update of the discriminator parameters
             z_prime = model(x2, no_dec= True)  # Used for the MLP update
 
-            z2 = discrim.permute_dims(z_prime)
+            z2 = discrim.permute_dims(z_prime).detach()
 
             new_discrim_probas = discrim(z2)
 
@@ -190,6 +189,7 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
 
             overall_discrim_loss = overall_discrim_loss + discrim_loss.item()
 
+            discrim_optimizer.zero_grad()
             discrim_loss.backward()
             discrim_optimizer.step()
 
@@ -198,17 +198,19 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
 
 device = "cuda"
 
-model = Factor_VAE(latent_size=5).to(device)
-model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-discrim = MLP_Discriminator().to(device)
-discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-3)
+if __name__=="__main__":
+    z = 10
+    model = Factor_VAE(latent_size=z).to(device)
+    model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    discrim = MLP_Discriminator(latent_dim=z).to(device)
+    discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-5)
 
-# Training
-gamma = 40
+    # Training
+    gamma = 40
 
-print("Training starting")
+    print("Training starting")
 
-train(model, discrim, model_optimizer, discrim_optimizer, 30, device=device, gamma=gamma)
+    train(model, discrim, model_optimizer, discrim_optimizer, epochs=500, device=device, gamma=gamma)
 
-torch.save(model.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/factor_vae_model.pt")
-torch.save(discrim.state_dict(), "C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/factor_vae_discrim.pt")
+    torch.save(model.state_dict(), f"./factor_vae_model_z_{z}.pt")
+    torch.save(discrim.state_dict(), f"./factor_vae_discrim_z_{z}.pt")
