@@ -132,7 +132,7 @@ if __name__=="__main__":
         z = 10
         model = beta_VAE(latent_size=z).to(device)
         # model.load_state_dict(torch.load("./beta4_vae.pt"))
-        optimizer = torch.optim.Adagrad(model.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         epochs = 500
         train(model, optimizer, epochs, device=device, beta = beta)
 

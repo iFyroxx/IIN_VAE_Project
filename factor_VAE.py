@@ -93,8 +93,7 @@ class MLP_Discriminator(nn.Module):
             nn.LeakyReLU(inplace=True),
             nn.Linear(128,64),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.Linear(64, 2),
         )
     
     def forward(self, x):
@@ -114,8 +113,8 @@ class MLP_Discriminator(nn.Module):
         return perm_z
     
     def discrim_loss(self, discrim_probas, new_discrim_probas):
-        zeros = torch.zeros((batch_size,1), dtype=torch.float, device=device)
-        loss = -0.5*torch.mean(torch.log(discrim_probas) + torch.log(1-new_discrim_probas))
+        zeros = torch.zeros(discrim_probas.shape[0],dtype=torch.long,device=device)
+        loss = 0.5*(nn.functional.cross_entropy(discrim_probas,zeros) + nn.functional.cross_entropy(1-new_discrim_probas,zeros))
         return loss
 
 # Combine Encoder, Decoder and Discriminator into Factor-VAE
@@ -145,7 +144,7 @@ class Factor_VAE(nn.Module):
     def fvae_loss(self, x_recons, x, mu, logvar, gamma, discriminator_probas):
         reproduction_loss = nn.functional.binary_cross_entropy(x_recons, x, reduction='sum')
         KLD = - 0.5 * torch.sum(1+ logvar - mu.pow(2) - logvar.exp())
-        MLP_loss = torch.mean(torch.log(discriminator_probas) - torch.log(1-discriminator_probas))
+        MLP_loss = torch.mean(discriminator_probas[:,:1] - discriminator_probas[:,1:])
 
         return reproduction_loss + KLD - gamma * MLP_loss
 
@@ -201,16 +200,16 @@ device = "cuda"
 if __name__=="__main__":
     z = 10
     model = Factor_VAE(latent_size=z).to(device)
-    model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     discrim = MLP_Discriminator(latent_dim=z).to(device)
-    discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-5)
+    discrim_optimizer = torch.optim.Adam(discrim.parameters(), lr=1e-4, betas=(0.5,0.9))
 
     # Training
     gamma = 40
 
     print("Training starting")
 
-    train(model, discrim, model_optimizer, discrim_optimizer, epochs=500, device=device, gamma=gamma)
+    train(model, discrim, model_optimizer, discrim_optimizer, epochs=30, device=device, gamma=gamma)
 
     torch.save(model.state_dict(), f"./factor_vae_model_z_{z}.pt")
     torch.save(discrim.state_dict(), f"./factor_vae_discrim_z_{z}.pt")
