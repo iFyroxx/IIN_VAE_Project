@@ -2,20 +2,22 @@ from torch import nn
 import torch
 import numpy as np
 import time
+import matplotlib.pyplot as plt
+import os
+from IPython.display import clear_output
 
 # Dataset initialization
 dataset_imgs = torch.tensor(np.load('./dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
-dataset_labels = np.load('./dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["latents_values"]
 
 torch.manual_seed(10)
-imgs_train_set, imgs_test_set = torch.utils.data.random_split(dataset_imgs, [0.95,0.05])
-labels_train_set, labels_test_set = torch.utils.data.random_split(dataset_labels, [0.95,0.05])
+imgs_train_set, imgs_val_set, imgs_test_set = torch.utils.data.random_split(dataset_imgs, [0.8,0.1,0.1])
 
 from torch.utils.data import DataLoader
 
 batch_size = 64
 imgs_train_set = DataLoader(imgs_train_set, batch_size=batch_size, shuffle=True)
-imgs_test_set = DataLoader(imgs_test_set, batch_size=batch_size, shuffle=False)
+imgs_val_set = DataLoader(imgs_val_set, batch_size=batch_size, shuffle=True)
+imgs_test_set = DataLoader(imgs_test_set, batch_size=batch_size, shuffle=True)
 
 # Encoder
 class Encoder(nn.Module):
@@ -104,10 +106,13 @@ class beta_VAE(nn.Module):
         return reproduction_loss + beta*KLD
 
 def train(model, optimizer, epochs, device="cpu", beta=4):
-    model.train()
+    train_losses = []
+    val_losses = []
+    fig = plt.figure()
     for epoch in range(epochs):
         t= time.time()
         overall_loss = 0
+        model.train()
         for x in imgs_train_set:
             x = x.to(device)
 
@@ -120,20 +125,52 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
             
             loss.backward()
             optimizer.step()
+        train_losses.append(overall_loss/len(imgs_train_set.dataset))
+        model.eval()
+        overall_eval_loss = 0
+        for x in imgs_val_set:
+            x = x.to(device)
+            x_recons, mean, logvar = model(x)
+            loss = model.loss(x_recons, x, mean, logvar, beta)
+            overall_eval_loss += loss.item()
+        val_losses.append(overall_eval_loss/len(imgs_val_set.dataset))
 
-        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / len(imgs_train_set.dataset), "\tDuration: ", time.time()-t)
+        if epoch%10==0 and epoch>51: 
+            plt.clf()
+            plt.plot(np.arange(epoch-50,epoch), train_losses[-50:], color="blue")
+            plt.plot(np.arange(epoch-50,epoch), val_losses[-50:], color="orange")
+            fig.canvas.draw()
+            plt.pause(0.05)
+
+        
+        if epoch%10==0:
+            print("\tEpoch", epoch + 1, "\tAverage train Loss: ", overall_loss / len(imgs_train_set.dataset),"\tAverage val Loss: ", overall_eval_loss / len(imgs_val_set.dataset), "\tDuration: ", time.time()-t)
+            torch.save(model.state_dict(), f"./beta{beta}_vae_{epoch}_z_{z}.pt")
+            if os.path.exists(f"./beta{beta}_vae_{epoch-10}_z_{z}.pt"):
+                os.remove(f"./beta{beta}_vae_{epoch-10}_z_{z}.pt")
     return overall_loss
 
 device = "cuda"
 
 # Training
 if __name__=="__main__":
-    for beta in [1,4,10]:
-        z = 10
+    for beta in [1,4]:
+        z = 4
         model = beta_VAE(latent_size=z).to(device)
         # model.load_state_dict(torch.load("./beta4_vae.pt"))
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         epochs = 500
         train(model, optimizer, epochs, device=device, beta = beta)
 
+        model.eval()
+        loss = nn.BCELoss()
+        overall_loss = 0
+        for x in imgs_test_set:
+            x=x.to(device)
+            x_recon,_,_ = model(x)
+            overall_loss += loss(x_recon, x).item()
+        
+        print(overall_loss/len(imgs_test_set.dataset)*64)
+
+        os.remove(f"./beta{beta}_vae_{epochs-10}_z_{z}.pt")
         torch.save(model.state_dict(), f"./beta{beta}_vae_{epochs}_z_{z}.pt")

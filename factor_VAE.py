@@ -5,18 +5,20 @@ from torch import nn
 import torch
 from torchvision import transforms
 from PIL import Image
+import matplotlib.pyplot as plt
 import numpy as np
 import time
 
 # Dataset initialization
 dataset = torch.tensor(np.load('C:/Users/Admin/Desktop/MVA/IIN/IIN_VAE_Project/dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
 
-train_set, test_set = torch.utils.data.random_split(dataset, [0.95,0.05])
+train_set, val_set, test_set = torch.utils.data.random_split(dataset, [0.8,0.1,0.1])
 
 from torch.utils.data import DataLoader
 
 batch_size = 64
 train_set = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+val_set = DataLoader(val_set, batch_size=batch_size, shuffle=True)
 test_set = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
 # Encoder
@@ -150,10 +152,13 @@ class Factor_VAE(nn.Module):
 
 from tqdm import tqdm
 
-def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cpu", gamma=4):
+def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cpu", gamma=4, latent_dim=10):
     model.train()
     discrim.train()
 
+    train_losses = []
+    val_losses = []
+    fig = plt.figure()
     for epoch in range(epochs):
         t = time.time()
         overall_vae_loss = 0
@@ -191,14 +196,28 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
             discrim_optimizer.zero_grad()
             discrim_loss.backward()
             discrim_optimizer.step()
+        
+        train_losses.append(overall_vae_loss/len(train_set.dataset))
+        if epoch%10==0 and epoch>51: 
+            plt.clf()
+            plt.plot(np.arange(epoch-50,epoch), train_losses[-50:])
+            fig.canvas.draw()
+            plt.pause(0.05)
+        if epoch%10==0:
+            torch.save(model.state_dict(), f"./factor_vae_model_{epoch}_z_{latent_dim}.pt")
+            torch.save(discrim.state_dict(), f"./factor_vae_discrim_{epoch}_z_{latent_dim}.pt")
+            if os.path.exists(f"./factor_vae_model_{epoch-10}_z_{latent_dim}.pt"):
+                os.remove(f"./factor_vae_model_{epoch-10}_z_{latent_dim}.pt")
+            if os.path.exists(f"./factor_vae_discrim_{epoch-10}_z_{latent_dim}.pt"):
+                os.remove(f"./factor_vae_discrim_{epoch-10}_z_{latent_dim}.pt")
+            print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_set.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_set.dataset), "\tDuration: ", time.time() - t)
 
-        print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_set.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_set.dataset), "\tDuration: ", time.time() - t)
     return overall_vae_loss, overall_discrim_loss
 
 device = "cuda"
 
 if __name__=="__main__":
-    z = 10
+    z = 4
     model = Factor_VAE(latent_size=z).to(device)
     model_optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     discrim = MLP_Discriminator(latent_dim=z).to(device)
@@ -209,7 +228,18 @@ if __name__=="__main__":
 
     print("Training starting")
 
-    train(model, discrim, model_optimizer, discrim_optimizer, epochs=30, device=device, gamma=gamma)
+    train(model, discrim, model_optimizer, discrim_optimizer, epochs=300, device=device, gamma=gamma, latent_dim=z)
+
+    model.eval()
+    discrim.eval()
+    total_loss = 0
+    loss = nn.BCELoss()
+    for x in test_set:
+        x = x.to(device)
+        x_recon, _,_,_ = model(x)
+        total_loss += loss(x_recon, x).item()
+    print(total_loss/len(test_set.dataset)*64)
+
 
     torch.save(model.state_dict(), f"./factor_vae_model_z_{z}.pt")
     torch.save(discrim.state_dict(), f"./factor_vae_discrim_z_{z}.pt")

@@ -24,9 +24,9 @@ class LinearClassifier(nn.Module):
 device = "cuda"
 
 if __name__=="__main__":
-    mode = "eval"
+    mode = "train"
     model = "beta"
-    z=10
+    z=4
     if model=="beta":
         if mode =="train":
             B=10
@@ -39,12 +39,13 @@ if __name__=="__main__":
                 optimizer = torch.optim.Adagrad(classifier.parameters(), lr=1e-2)
                 loss_fn = nn.CrossEntropyLoss()
                 model = beta_VAE(latent_size=z).to(device)
-                model.load_state_dict(torch.load(f"./beta{beta}_vae_500_z_{z}.pt"))
+                epochs = 5000
+                model.load_state_dict(torch.load(f"./beta{beta}_vae_{epochs}_z_{z}.pt"))
                 # Train the classifier on the training data
                 classifier.train()
                 model.eval()
                 total_acc = 0
-                for epoch in range(5000):
+                for epoch in range(200):
                     z_diff = torch.zeros((B, z)).to(device)
                     possible_factors = torch.tensor([1,3,4,5])
                     y_true_idx = torch.ones(4).multinomial(B,replacement=True)
@@ -94,13 +95,14 @@ if __name__=="__main__":
         elif mode =="eval":
             B=800
             L=200
-            for beta in [1,4,10]:
+            for beta in [1,4]:
                 classifier = LinearClassifier(in_features=z).to(device)
                 classifier.load_state_dict(torch.load(f"./classifier_{beta}_z_{z}.pt"))
 
                 # Define a loss function and optimizer
                 model = beta_VAE(latent_size=z).to(device)
-                model.load_state_dict(torch.load(f"./beta{beta}_vae_500_z_{z}.pt"))
+                epochs = 200
+                model.load_state_dict(torch.load(f"./beta{beta}_vae_{epochs}_z_{z}.pt"))
                 # Train the classifier on the training data
                 classifier.eval()
                 model.eval()
@@ -145,12 +147,12 @@ if __name__=="__main__":
             optimizer = torch.optim.Adagrad(classifier.parameters(), lr=1e-2)
             loss_fn = nn.CrossEntropyLoss()
             model = Factor_VAE(latent_size=z).to(device)
-            model.load_state_dict(torch.load(f"./factor_vae_model_z_{z}.pt"))
+            model.load_state_dict(torch.load(f"./factor_vae_model_100_z_{z}.pt"))
             # Train the classifier on the training data
             classifier.train()
             model.eval()
             total_acc = 0
-            for epoch in range(5000):
+            for epoch in range(200):
                 z_diff = torch.zeros((B, z)).to(device)
                 possible_factors = torch.tensor([1,3,4,5])
                 y_true_idx = torch.ones(4).multinomial(B,replacement=True)
@@ -205,7 +207,7 @@ if __name__=="__main__":
 
             # Define a loss function and optimizer
             model = Factor_VAE(latent_size=z).to(device)
-            model.load_state_dict(torch.load(f"./factor_vae_model_z_{z}.pt"))
+            model.load_state_dict(torch.load(f"./factor_vae_model_100_z_{z}.pt"))
             # Train the classifier on the training data
             classifier.eval()
             model.eval()
