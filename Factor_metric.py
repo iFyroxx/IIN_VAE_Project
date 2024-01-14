@@ -63,9 +63,9 @@ z=4
 #             x = x.to(device)
 
 #             c, encoded_x=model.encode(x)
-#             encodings.append(encoded_x.detach().cpu().numpy()[:,:z])
+#             encodings.append(c.detach().cpu().numpy()[:,:2*z])
 
-#         encodings = np.array(encodings).reshape((-1,z))
+#         encodings = np.array(encodings).reshape((-1,2*z))
 #         std = np.std(encodings, axis=0)
 #         np.savez_compressed(f"empirical_stds_{model_name}.npz", std=std)
 #     elif model_name =="TC":
@@ -91,7 +91,7 @@ M=500
 z=4
 
 device ="cuda"
-model_name="TC"
+model_name="DAE"
 if model_name=="beta":
     beta = 4
     s_beta = torch.tensor(np.load(f"empirical_stds_beta_{beta}_VAE.npz")["std"], device=device)
@@ -163,7 +163,7 @@ elif model_name=="factor":
         accuracies[epoch] = acc
 
 elif model_name=="DAE":
-    s_factor = torch.tensor(np.load("empirical_stds_DAE.npz")["std"], device=device)
+    s_DAE = torch.tensor(np.load("empirical_stds_DAE.npz")["std"], device=device)
     alpha = torch.Tensor([[1., 1., 0.01, 0.01]]).cuda()
     model = DAE(4, alpha)
     model.load_state_dict(torch.load(f"./DAE_500.pt"))
@@ -172,12 +172,12 @@ elif model_name=="DAE":
     accuracies = np.zeros(10)
     for epoch in range(10):
         possible_factors = torch.tensor([1,3,4,5])
-        V = torch.zeros((4,z))
+        V = torch.zeros((4,2*z))
         y_true_idx = torch.ones(4).multinomial(M,replacement=True)
         y_true = possible_factors[y_true_idx] # Choose the fixed parameters, labels for the classifiers
         ds = np.zeros(M)
         for i in tqdm(range(M)):
-            zs = torch.zeros((L,z))
+            zs = torch.zeros((L,2*z))
             for l in range(L):
                 v = torch.randint(len(labels),(1,))[0]
                 if l==0:
@@ -185,9 +185,9 @@ elif model_name=="DAE":
                 while labels[v][y_true[i]]!=fixed_factor_value:
                     v = torch.randint(len(labels),(1,))[0]
                 x = images[v].to(device)
-                c, latent = model.encode(x)
-                latent = latent.detach()[:, :z]
-                latent = (latent/s_factor).squeeze(0)
+                latent,_ = model.encode(x)
+                latent = latent.detach()[:, :2*z]
+                latent = (latent/s_DAE).squeeze(0)
                 zs[l] = latent
             variances = torch.var(zs, axis=0)
             d = torch.argmin(variances) # Inputs for the classifiers
@@ -199,7 +199,7 @@ elif model_name=="DAE":
         accuracies[epoch] = acc
 
 elif model_name=="TC":
-    s_factor = torch.tensor(np.load("empirical_stds_TC_VAE.npz")["std"], device=device)
+    s_TC = torch.tensor(np.load("empirical_stds_TC_VAE.npz")["std"], device=device)
     model = VAE(z,6).to(device)
     model.load_state_dict(torch.load(f"./TC_VAE_500.pt"))
     model.eval()
@@ -221,7 +221,7 @@ elif model_name=="TC":
                 x = images[v].to(device)
                 latent = model.encoder(x).detach()
                 latent = latent[:, :z]
-                latent = (latent/s_factor).squeeze(0)
+                latent = (latent/s_TC).squeeze(0)
                 zs[l] = latent
             variances = torch.var(zs, axis=0)
             d = torch.argmin(variances) # Inputs for the classifiers
