@@ -21,6 +21,8 @@ train_set = DataLoader(train_set, batch_size=batch_size, shuffle=True)
 val_set = DataLoader(val_set, batch_size=batch_size, shuffle=True)
 test_set = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
+### Model definition ###
+
 # Encoder
 class Encoder(nn.Module):
     def __init__(self, latent_size=6):
@@ -103,6 +105,7 @@ class MLP_Discriminator(nn.Module):
         x = self.layers(x)
         return x
     
+    ### Function adapted from https://github.com/1Konny/FactorVAE/blob/master/ops.py ###
     def permute_dims(self,z):
         assert z.dim() == 2
 
@@ -149,8 +152,8 @@ class Factor_VAE(nn.Module):
         MLP_loss = torch.mean(discriminator_probas[:,:1] - discriminator_probas[:,1:])
 
         return reproduction_loss + KLD - gamma * MLP_loss
-
-from tqdm import tqdm
+    
+### Train function ###
 
 def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cpu", gamma=4, latent_dim=10):
     model.train()
@@ -213,6 +216,8 @@ def train(model, discrim, model_optimizer, discrim_optimizer, epochs, device="cp
             print("\tEpoch", epoch + 1, "\tAverage VAE Loss: ", overall_vae_loss / len(train_set.dataset), "\tAverage MLP Loss: ", overall_discrim_loss / len(train_set.dataset), "\tDuration: ", time.time() - t)
 
     return overall_vae_loss, overall_discrim_loss
+
+### Training loop ###
 
 device = "cuda"
 

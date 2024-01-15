@@ -1,4 +1,3 @@
-from classifier_metric import LinearClassifier
 import torch
 import numpy as np
 from beta_VAE import beta_VAE

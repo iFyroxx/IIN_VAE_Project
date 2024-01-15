@@ -19,6 +19,8 @@ imgs_train_set = DataLoader(imgs_train_set, batch_size=batch_size, shuffle=True)
 imgs_val_set = DataLoader(imgs_val_set, batch_size=batch_size, shuffle=True)
 imgs_test_set = DataLoader(imgs_test_set, batch_size=batch_size, shuffle=True)
 
+### Model definition ###
+
 # Encoder
 class Encoder(nn.Module):
     def __init__(self, latent_size=6):
@@ -105,6 +107,8 @@ class beta_VAE(nn.Module):
 
         return reproduction_loss + beta*KLD
 
+### Train function ###
+
 def train(model, optimizer, epochs, device="cpu", beta=4):
     train_losses = []
     val_losses = []
@@ -150,9 +154,10 @@ def train(model, optimizer, epochs, device="cpu", beta=4):
                 os.remove(f"./beta{beta}_vae_{epoch-10}_z_{z}.pt")
     return overall_loss
 
+### Training loop ###
+
 device = "cuda"
 
-# Training
 if __name__=="__main__":
     for beta in [1,4]:
         z = 4
