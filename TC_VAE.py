@@ -11,7 +11,9 @@ import matplotlib.pyplot as plt
 
 
 ############# UTILS #####################
-
+#  this part of the code come from:
+#  https://github.com/rtqichen/beta-tcvae
+#########################################
 class Normal(nn.Module):
     """Samples from a Normal distribution using the reparameterization trick.
     """
@@ -213,7 +215,7 @@ class STHeaviside(Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output
-    
+ 
 ########################################################
 ##                ARCHITECTURE                        ##
 ########################################################
@@ -277,6 +279,10 @@ class ConvDecoder(nn.Module):
         return mu_img
     
 ################### MODEL #######################
+##   Adapted from the original implementation     
+##      of the TC-VAE paper
+#################################################
+    
 class VAE(nn.Module):
     def __init__(self, z_dim, beta, use_cuda=True):
         super(VAE, self).__init__()
@@ -286,19 +292,15 @@ class VAE(nn.Module):
         self.beta = beta #penalisation
         self.x_dist = Bernoulli()
 
-        # Model-specific
-        # distribution family of p(z)
+        #distribution
         self.prior_dist = Normal()
         self.q_dist = Normal()
-        # hyperparameters for prior p(z)
         self.register_buffer('prior_params', torch.zeros(self.z_dim, 2))
 
-        # create the encoder and decoder networks
+       
         self.encoder = ConvEncoder(z_dim * self.q_dist.nparams) #to return mu and sigma
         self.decoder = ConvDecoder(z_dim)
         if use_cuda:
-            # calling cuda() here will put all the parameters of
-            # the encoder and decoder networks into gpu memory
             self.cuda()
 
     # return prior parameters wrapped in a suitable Variable
@@ -309,20 +311,13 @@ class VAE(nn.Module):
 
     # samples from the model p(x|z)p(z)
     def model_sample(self, batch_size=1):
-        # sample from prior (value will be sampled by guide when computing the ELBO)
         prior_params = self._get_prior_params(batch_size)
         zs = self.prior_dist.sample(params=prior_params)
-        # decode the latent code z
         x_params = self.decoder.forward(zs)
         return x_params
 
-    # define the guide (i.e. variational distribution) q(z|x)
+    #q(z|x)
     def encode(self, x):
-        """
-        charles utilise cette fonction pour ta métrique,
-        z_params c'est mu et sigma pour echantionner le vecteur latent
-        zs c'est le vecteur latent echantionné dont tu as besoin
-        """
         x = x.view(x.size(0), 1, 64, 64)
         # use the encoder to get the parameters used to define q(z|x)
         z_params = self.encoder.forward(x).view(x.size(0), self.z_dim, self.q_dist.nparams)
@@ -330,15 +325,12 @@ class VAE(nn.Module):
         zs = self.q_dist.sample(params=z_params)
         return zs, z_params
 
+    #p(x|z)
     def decode(self, z):
-        """
-        pour decoder tu donne zs en entrée à cette methode
-        """
         x_params = self.decoder.forward(z).view(z.size(0), 1, 64, 64)
         xs = self.x_dist.sample(params=x_params)
         return xs, x_params
 
-    # define a helper function for reconstructing images
     def reconstruct_img(self, x):
         zs, z_params = self.encode(x)
         xs, x_params = self.decode(zs)
@@ -354,11 +346,8 @@ class VAE(nn.Module):
         W[M-1, 0] = strat_weight
         return W.log()
 
+    #simplified version of the elbo computation given in the TC-VAE code
     def penalised_elbo(self, x, dataset_size):
-        """
-        elbo: log p(x|z) + log p(z) - log q(z|x)
-        penalised elbo:
-        """
         batch_size = x.size(0)
         x = x.view(batch_size, 1, 64, 64)
         prior_params = self._get_prior_params(batch_size)
@@ -383,9 +372,87 @@ class VAE(nn.Module):
                     (logqz_prodmarginals - logpz)
         return penalised_elbo
     
-############## LOAD the Model ####################
-if __name__=="__main__":
-    model = VAE(4, 6)
-    model.load_state_dict(torch.load("./TC-VAE.pt"))
-    model.eval()
-    model.cuda()
+############## Train the Model ####################
+##### PARAMETERS ##############
+z_dim = 4
+beta = 6
+lr = 0.0001
+num_epochs = 500
+###############################
+# Dataset initialization
+dataset_imgs = torch.tensor(np.load('./data/dsprites_no_scale.npz', allow_pickle=True, encoding='bytes')["imgs"], dtype=torch.float).unsqueeze(1)
+
+torch.manual_seed(10)
+imgs_train_set, imgs_test_set, imgs_val_set = torch.utils.data.random_split(dataset_imgs, [0.80, 0.10, 0.10])
+batch_size = 64
+imgs_train_set = DataLoader(imgs_train_set, batch_size=batch_size, shuffle=True)
+imgs_test_set = DataLoader(imgs_test_set, batch_size=batch_size, shuffle=False)
+imgs_val_set = DataLoader(imgs_val_set, batch_size=batch_size, shuffle=True)
+
+
+vae = VAE(z_dim=z_dim, beta=beta)
+optimizer = optim.Adam(vae.parameters(), lr=lr)
+train_dataset_size = len(imgs_train_set.dataset)
+val_dataset_size = len(imgs_val_set.dataset)
+train_dataset_size = len(imgs_train_set.dataset)
+test_dataset_size = len(imgs_test_set.dataset)
+
+
+train_loss = []
+val_loss = []
+
+#training loop
+for epoch in range(0, num_epochs):
+  elbo_tracking = []
+  epoch_time = time.time()
+  if epoch > 150 and epoch % 50 == 0:
+    #save the model
+    torch.save(vae.state_dict(), f"./TCVAE-{epoch}epochs.pt")
+  for i, x in enumerate(imgs_train_set):
+    vae.train()
+    optimizer.zero_grad()
+    x = x.cuda()
+    x = Variable(x)
+    # do ELBO gradient and accumulate loss
+    penalised_elbo = vae.penalised_elbo(x, train_dataset_size)
+    penalised_elbo.mean().mul(-1).backward()
+    elbo_tracking.append(penalised_elbo.mean().mul(-1).item())
+    optimizer.step()
+  train_loss.append(sum(elbo_tracking) / len(elbo_tracking))
+  print('[epoch %03d] time: %.2f training average loss: %.4f' % (epoch, time.time() - epoch_time, train_loss[-1]))
+  for i, x in enumerate(imgs_val_set):
+    elbo_tracking = []
+    vae.eval()
+    x = x.cuda()
+    # compute ELBO
+    penalised_elbo = vae.penalised_elbo(x, val_dataset_size)
+    penalised_elbo.mean().mul(-1)
+    elbo_tracking.append(penalised_elbo.mean().mul(-1).item())
+  val_loss.append(sum(elbo_tracking) / len(elbo_tracking))
+  print('[epoch %03d] time: %.2f validation average loss: %.4f' % (epoch, time.time() - epoch_time, val_loss[-1]))
+
+#save the model
+torch.save(vae.state_dict(), "./TC-VAE.pt")
+
+#plot the learning curve
+epochs = range(1, num_epochs + 1)
+plt.plot(epochs, train_loss, 'b', label='Training loss')
+plt.plot(epochs, val_loss, 'r', label='Validation loss')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+#evaluate the reconstruction on the test dataset
+reconstruction_crit = nn.BCELoss()
+vae.eval()
+bce = []
+for i, x in enumerate(imgs_test_set):
+    # transfer to GPU
+    x = x.cuda()
+    # reconstruct the image
+    x_recon, _, _, _ = vae.reconstruct_img(x)
+    bce.append(reconstruction_crit(x_recon.view(-1), x.view(-1)))
+print(f"the average reconstruction loss on the test dataset is {sum(bce)/len(bce)}")
+
